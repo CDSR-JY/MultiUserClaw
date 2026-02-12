@@ -200,6 +200,19 @@ class ProvidersConfig(BaseModel):
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
 
 
+class ProxyConfig(BaseModel):
+    """LLM Proxy configuration for multi-tenant (container) mode.
+
+    When ``url`` is set, all LLM calls are routed through the platform's
+    LLM Proxy instead of directly calling provider APIs.  The proxy is
+    OpenAI-compatible and handles API-key injection, usage tracking and
+    quota enforcement.  The ``token`` is a per-container credential that
+    identifies the user but carries no LLM secrets.
+    """
+    url: str = ""     # e.g. "http://gateway:8080/llm/v1"
+    token: str = ""   # container token issued by the platform
+
+
 class GatewayConfig(BaseModel):
     """Gateway/server configuration."""
     host: str = "0.0.0.0"
@@ -234,8 +247,14 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+
+    @property
+    def is_proxy_mode(self) -> bool:
+        """True when running inside a managed container with LLM Proxy."""
+        return bool(self.proxy.url)
     
     @property
     def workspace_path(self) -> Path:

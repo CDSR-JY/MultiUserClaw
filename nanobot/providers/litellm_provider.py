@@ -21,29 +21,42 @@ class LiteLLMProvider(LLMProvider):
     """
     
     def __init__(
-        self, 
-        api_key: str | None = None, 
+        self,
+        api_key: str | None = None,
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        *,
+        proxy_url: str | None = None,
+        proxy_token: str | None = None,
     ):
-        super().__init__(api_key, api_base)
-        self.default_model = default_model
-        self.extra_headers = extra_headers or {}
-        
-        # Detect gateway / local deployment.
-        # provider_name (from config key) is the primary signal;
-        # api_key / api_base are fallback for auto-detection.
-        self._gateway = find_gateway(provider_name, api_key, api_base)
-        
-        # Configure environment variables
-        if api_key:
-            self._setup_env(api_key, api_base, default_model)
-        
-        if api_base:
-            litellm.api_base = api_base
-        
+        # Proxy mode: route all LLM calls through the platform's LLM Proxy.
+        # The proxy is OpenAI-compatible; real API keys live on the platform,
+        # not inside the container.
+        self._proxy_mode = bool(proxy_url)
+        if self._proxy_mode:
+            super().__init__(api_key=proxy_token, api_base=proxy_url)
+            self.default_model = default_model
+            self.extra_headers = {}
+            self._gateway = None
+        else:
+            super().__init__(api_key, api_base)
+            self.default_model = default_model
+            self.extra_headers = extra_headers or {}
+
+            # Detect gateway / local deployment.
+            # provider_name (from config key) is the primary signal;
+            # api_key / api_base are fallback for auto-detection.
+            self._gateway = find_gateway(provider_name, api_key, api_base)
+
+            # Configure environment variables
+            if api_key:
+                self._setup_env(api_key, api_base, default_model)
+
+            if api_base:
+                litellm.api_base = api_base
+
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
@@ -72,6 +85,12 @@ class LiteLLMProvider(LLMProvider):
     
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
+        if self._proxy_mode:
+            # Proxy mode: send the model name as-is via the OpenAI-compatible
+            # path.  The proxy resolves the real provider on its side.
+            bare = model.split("/")[-1]  # strip any "anthropic/" prefix
+            return f"openai/{bare}"
+
         if self._gateway:
             # Gateway mode: apply gateway prefix, skip provider-specific prefixes
             prefix = self._gateway.litellm_prefix

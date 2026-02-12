@@ -137,8 +137,16 @@ def _make_provider(config: Config):
     """Create LLM provider from config."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
 
-    p = config.get_provider()
     model = config.agents.defaults.model
+
+    if config.is_proxy_mode:
+        return LiteLLMProvider(
+            default_model=model,
+            proxy_url=config.proxy.url,
+            proxy_token=config.proxy.token,
+        )
+
+    p = config.get_provider()
     if not (p and p.api_key) and not model.startswith("bedrock/"):
         raise RuntimeError("No API key configured. Set one in ~/.nanobot/config.json")
     return LiteLLMProvider(

@@ -1,8 +1,12 @@
 import { create } from 'zustand';
-import type { ChatMessage, Session } from '@/types';
+import type { ChatMessage, Session, AuthUser } from '@/types';
 import type { WsStatus } from '@/lib/api';
 
 interface ChatStore {
+  // Auth
+  user: AuthUser | null;
+  isAuthLoading: boolean;
+
   // Current session
   sessionId: string;
   messages: ChatMessage[];
@@ -17,6 +21,8 @@ interface ChatStore {
   sessions: Session[];
 
   // Actions
+  setUser: (user: AuthUser | null) => void;
+  setIsAuthLoading: (loading: boolean) => void;
   setSessionId: (id: string) => void;
   setMessages: (msgs: ChatMessage[]) => void;
   addMessage: (msg: ChatMessage) => void;
@@ -30,6 +36,8 @@ interface ChatStore {
 }
 
 export const useChatStore = create<ChatStore>((set) => ({
+  user: null,
+  isAuthLoading: true,
   sessionId: 'web:default',
   messages: [],
   isLoading: false,
@@ -38,6 +46,8 @@ export const useChatStore = create<ChatStore>((set) => ({
   isThinking: false,
   sessions: [],
 
+  setUser: (user) => set({ user }),
+  setIsAuthLoading: (loading) => set({ isAuthLoading: loading }),
   setSessionId: (id) => set({ sessionId: id }),
   setMessages: (msgs) => set({ messages: msgs }),
   addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),

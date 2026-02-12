@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import Header from '@/components/Header';
+import AuthGuard from '@/components/AuthGuard';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -20,7 +21,9 @@ export default function RootLayout({
       <body className={inter.className}>
         <div className="min-h-screen bg-background text-foreground">
           <Header />
-          <main className="pt-14">{children}</main>
+          <main className="pt-14">
+            <AuthGuard>{children}</AuthGuard>
+          </main>
         </div>
       </body>
     </html>

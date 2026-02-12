@@ -1,0 +1,76 @@
+# Nanobot Multi-Tenant Deployment
+#
+# Architecture:
+#   frontend (public:3000) → gateway (internal+external) → per-user containers (internal only)
+#                                  ↕
+#                            postgres (internal)
+#
+# User containers are created dynamically by the gateway via Docker API,
+# NOT defined in this compose file.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nanobot
+      POSTGRES_PASSWORD: nanobot
+      POSTGRES_DB: nanobot_platform
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - nanobot-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nanobot"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    build: ./platform
+    ports:
+      - "8080:8080"
+    environment:
+      PLATFORM_DATABASE_URL: postgresql+asyncpg://nanobot:nanobot@postgres:5432/nanobot_platform
+      PLATFORM_JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+
+      # LLM API Keys — ONLY here, never in user containers
+      PLATFORM_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      PLATFORM_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PLATFORM_DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      PLATFORM_OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+
+      PLATFORM_DEFAULT_MODEL: ${DEFAULT_MODEL:-claude-sonnet-4-5}
+      PLATFORM_NANOBOT_IMAGE: nanobot:latest
+      PLATFORM_CONTAINER_NETWORK: nanobot-internal
+      PLATFORM_CONTAINER_DATA_DIR: /data/nanobot-users
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker API access for container management
+      - userdata:/data/nanobot-users
+    networks:
+      - nanobot-internal   # talk to postgres + user containers
+      - nanobot-external   # accept traffic from frontend / public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    networks:
+      - nanobot-external
+    depends_on:
+      - gateway
+
+networks:
+  nanobot-internal:
+    driver: bridge
+    internal: true   # no internet access — user containers cannot reach LLM APIs directly
+  nanobot-external:
+    driver: bridge
+
+volumes:
+  pgdata:
+  userdata:

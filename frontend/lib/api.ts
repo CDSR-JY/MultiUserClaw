@@ -1,21 +1,86 @@
-// Nanobot API client
+// Nanobot API client — multi-tenant edition
+//
+// In multi-tenant mode the frontend talks to the Platform Gateway.
+// Auth requests go to /api/auth/*, nanobot requests are proxied via
+// /api/nanobot/* to the user's container.
 
-import type { ChatMessage, Session, SessionDetail, SystemStatus, CronJob } from '@/types';
+import type { ChatMessage, Session, SessionDetail, SystemStatus, CronJob, TokenResponse, AuthUser } from '@/types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:18080';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
-function getWsUrl(): string {
-  // Derive WebSocket URL from API_URL
-  const url = new URL(API_URL);
-  const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${url.host}`;
+// ---------------------------------------------------------------------------
+// Token management
+// ---------------------------------------------------------------------------
+
+const TOKEN_KEY = 'nanobot_access_token';
+const REFRESH_KEY = 'nanobot_refresh_token';
+
+export function getAccessToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(REFRESH_KEY);
+}
+
+export function setTokens(access: string, refresh: string): void {
+  localStorage.setItem(TOKEN_KEY, access);
+  localStorage.setItem(REFRESH_KEY, refresh);
+}
+
+export function clearTokens(): void {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+}
+
+export function isLoggedIn(): boolean {
+  return !!getAccessToken();
+}
+
+// ---------------------------------------------------------------------------
+// HTTP helpers
+// ---------------------------------------------------------------------------
+
+function authHeaders(): Record<string, string> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 async function fetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     ...options,
   });
+
+  if (res.status === 401) {
+    // Try refresh
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      // Retry with new token
+      const retry = await fetch(`${API_URL}${path}`, {
+        headers: authHeaders(),
+        ...options,
+      });
+      if (!retry.ok) {
+        const text = await retry.text();
+        throw new Error(`API error ${retry.status}: ${text}`);
+      }
+      return retry.json();
+    }
+    // Refresh failed — force logout
+    clearTokens();
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
+    throw new Error('Session expired');
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API error ${res.status}: ${text}`);
@@ -23,13 +88,78 @@ async function fetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-// ---- Chat ----
+async function tryRefreshToken(): Promise<boolean> {
+  const refresh = getRefreshToken();
+  if (!refresh) return false;
+  try {
+    const res = await fetch(`${API_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refresh }),
+    });
+    if (!res.ok) return false;
+    const data: TokenResponse = await res.json();
+    setTokens(data.access_token, data.refresh_token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Auth API
+// ---------------------------------------------------------------------------
+
+export async function register(username: string, email: string, password: string): Promise<TokenResponse> {
+  const res = await fetch(`${API_URL}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, email, password }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: 'Registration failed' }));
+    throw new Error(data.detail || 'Registration failed');
+  }
+  const data: TokenResponse = await res.json();
+  setTokens(data.access_token, data.refresh_token);
+  return data;
+}
+
+export async function login(username: string, password: string): Promise<TokenResponse> {
+  const res = await fetch(`${API_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: 'Login failed' }));
+    throw new Error(data.detail || 'Invalid credentials');
+  }
+  const data: TokenResponse = await res.json();
+  setTokens(data.access_token, data.refresh_token);
+  return data;
+}
+
+export function logout(): void {
+  clearTokens();
+  if (typeof window !== 'undefined') {
+    window.location.href = '/login';
+  }
+}
+
+export async function getMe(): Promise<AuthUser> {
+  return fetchJSON('/api/auth/me');
+}
+
+// ---------------------------------------------------------------------------
+// Chat (proxied via /api/nanobot/)
+// ---------------------------------------------------------------------------
 
 export async function sendMessage(
   message: string,
   sessionId: string = 'web:default'
 ): Promise<{ response?: string; status?: string; session_id: string }> {
-  return fetchJSON('/api/chat', {
+  return fetchJSON('/api/nanobot/chat', {
     method: 'POST',
     body: JSON.stringify({ message, session_id: sessionId }),
   });
@@ -46,9 +176,9 @@ export function streamMessage(
 
   (async () => {
     try {
-      const res = await fetch(`${API_URL}/api/chat/stream`, {
+      const res = await fetch(`${API_URL}/api/nanobot/chat/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ message, session_id: sessionId }),
         signal: controller.signal,
       });
@@ -97,7 +227,9 @@ export function streamMessage(
   return () => controller.abort();
 }
 
-// ---- WebSocket Manager ----
+// ---------------------------------------------------------------------------
+// WebSocket Manager
+// ---------------------------------------------------------------------------
 
 export type WsStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -109,6 +241,12 @@ export type WsMessageHandler = (data: {
 }) => void;
 
 export type WsStatusListener = (status: WsStatus) => void;
+
+function getWsUrl(): string {
+  const url = new URL(API_URL);
+  const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${url.host}`;
+}
 
 class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -123,7 +261,6 @@ class WebSocketManager {
   private intentionalClose = false;
 
   connect(sessionId: string): void {
-    // If already connected to the same session, skip
     if (this.sessionId === sessionId && this.ws?.readyState === globalThis.WebSocket?.OPEN) {
       return;
     }
@@ -155,7 +292,6 @@ class WebSocketManager {
 
   onStatusChange(listener: WsStatusListener): () => void {
     this.statusListeners.push(listener);
-    // Immediately notify of current status
     listener(this.status);
     return () => {
       this.statusListeners = this.statusListeners.filter((l) => l !== listener);
@@ -173,8 +309,12 @@ class WebSocketManager {
 
     this._setStatus('connecting');
 
+    // In multi-tenant mode, connect through the gateway with auth token
     const wsUrl = getWsUrl();
-    const ws = new globalThis.WebSocket(`${wsUrl}/ws/${this.sessionId}`);
+    const token = getAccessToken() || '';
+    const ws = new globalThis.WebSocket(
+      `${wsUrl}/api/nanobot/ws/${this.sessionId}?token=${encodeURIComponent(token)}`
+    );
 
     ws.onopen = () => {
       this.reconnectDelay = 1000;
@@ -185,7 +325,7 @@ class WebSocketManager {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'pong') return; // keepalive response
+        if (data.type === 'pong') return;
         for (const handler of this.messageHandlers) {
           handler(data);
         }
@@ -264,30 +404,36 @@ class WebSocketManager {
 
 export const wsManager = new WebSocketManager();
 
-// ---- Sessions ----
+// ---------------------------------------------------------------------------
+// Sessions (proxied)
+// ---------------------------------------------------------------------------
 
 export async function listSessions(): Promise<Session[]> {
-  return fetchJSON('/api/sessions');
+  return fetchJSON('/api/nanobot/sessions');
 }
 
 export async function getSession(key: string): Promise<SessionDetail> {
-  return fetchJSON(`/api/sessions/${encodeURIComponent(key)}`);
+  return fetchJSON(`/api/nanobot/sessions/${encodeURIComponent(key)}`);
 }
 
 export async function deleteSession(key: string): Promise<void> {
-  await fetchJSON(`/api/sessions/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  await fetchJSON(`/api/nanobot/sessions/${encodeURIComponent(key)}`, { method: 'DELETE' });
 }
 
-// ---- Status ----
+// ---------------------------------------------------------------------------
+// Status (proxied)
+// ---------------------------------------------------------------------------
 
 export async function getStatus(): Promise<SystemStatus> {
-  return fetchJSON('/api/status');
+  return fetchJSON('/api/nanobot/status');
 }
 
-// ---- Cron ----
+// ---------------------------------------------------------------------------
+// Cron (proxied)
+// ---------------------------------------------------------------------------
 
 export async function listCronJobs(includeDisabled: boolean = true): Promise<CronJob[]> {
-  return fetchJSON(`/api/cron/jobs?include_disabled=${includeDisabled}`);
+  return fetchJSON(`/api/nanobot/cron/jobs?include_disabled=${includeDisabled}`);
 }
 
 export async function addCronJob(params: {
@@ -297,25 +443,25 @@ export async function addCronJob(params: {
   cron_expr?: string;
   at_iso?: string;
 }): Promise<CronJob> {
-  return fetchJSON('/api/cron/jobs', {
+  return fetchJSON('/api/nanobot/cron/jobs', {
     method: 'POST',
     body: JSON.stringify(params),
   });
 }
 
 export async function removeCronJob(jobId: string): Promise<void> {
-  await fetchJSON(`/api/cron/jobs/${jobId}`, { method: 'DELETE' });
+  await fetchJSON(`/api/nanobot/cron/jobs/${jobId}`, { method: 'DELETE' });
 }
 
 export async function toggleCronJob(jobId: string, enabled: boolean): Promise<CronJob> {
-  return fetchJSON(`/api/cron/jobs/${jobId}/toggle`, {
+  return fetchJSON(`/api/nanobot/cron/jobs/${jobId}/toggle`, {
     method: 'PUT',
     body: JSON.stringify({ enabled }),
   });
 }
 
 export async function runCronJob(jobId: string): Promise<void> {
-  await fetchJSON(`/api/cron/jobs/${jobId}/run`, { method: 'POST' });
+  await fetchJSON(`/api/nanobot/cron/jobs/${jobId}/run`, { method: 'POST' });
 }
 
 export async function ping(): Promise<{ message: string }> {

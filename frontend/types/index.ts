@@ -1,5 +1,22 @@
 // Nanobot frontend types
 
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  role: string;
+  quota_tier: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  user_id: string;
+  username: string;
+  role: string;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
