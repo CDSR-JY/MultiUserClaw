@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx --yes tsc:*)",
+      "Bash(node_modules/.bin/tsc:*)",
+      "Bash(node_modules/.bin/next build:*)",
+      "Bash(python -c:*)",
+      "Bash(pip install:*)",
+      "Bash(npm run build:*)"
+    ]
+  }
+}
