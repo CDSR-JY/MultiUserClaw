@@ -32,7 +32,7 @@ def _ensure_network() -> None:
         client.networks.create(
             settings.container_network,
             driver="bridge",
-            internal=False,  # no internet access from this network
+            internal=False,  # allow internet access for tool downloads
         )
 
 

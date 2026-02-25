@@ -66,6 +66,14 @@ export interface SystemStatus {
   };
 }
 
+export interface Skill {
+  name: string;
+  description: string;
+  source: 'builtin' | 'workspace';
+  available: boolean;
+  path: string;
+}
+
 export interface CronJob {
   id: string;
   name: string;

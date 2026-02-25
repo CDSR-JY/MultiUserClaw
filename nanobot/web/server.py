@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import zipfile
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -446,6 +449,150 @@ def _register_routes(app: FastAPI) -> None:
         if await cron.run_job(job_id, force=True):
             return {"ok": True}
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # ------ Skills ------
+
+    @app.get("/api/skills")
+    async def list_skills():
+        """List all skills (builtin + workspace)."""
+        from nanobot.agent.skills import SkillsLoader
+
+        config: Config = app.state.config
+        loader = SkillsLoader(config.workspace_path)
+        raw = loader.list_skills(filter_unavailable=False)
+        result = []
+        for s in raw:
+            meta = loader.get_skill_metadata(s["name"]) or {}
+            available = loader._check_requirements(loader._get_skill_meta(s["name"]))
+            result.append({
+                "name": s["name"],
+                "description": meta.get("description", s["name"]),
+                "source": s["source"],
+                "available": available,
+                "path": s["path"],
+            })
+        return result
+
+    @app.delete("/api/skills/{name}")
+    async def delete_skill(name: str):
+        """Delete a workspace skill."""
+        from nanobot.agent.skills import SkillsLoader
+
+        config: Config = app.state.config
+        loader = SkillsLoader(config.workspace_path)
+
+        # Check the skill exists and is a workspace skill
+        all_skills = loader.list_skills(filter_unavailable=False)
+        skill = next((s for s in all_skills if s["name"] == name), None)
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        if skill["source"] != "workspace":
+            raise HTTPException(status_code=400, detail="Cannot delete builtin skills")
+
+        skill_dir = loader.workspace_skills / name
+        if skill_dir.exists():
+            shutil.rmtree(skill_dir)
+        return {"ok": True}
+
+    @app.get("/api/skills/{name}/download")
+    async def download_skill(name: str):
+        """Download a skill as a zip file."""
+        from nanobot.agent.skills import SkillsLoader
+        import io
+
+        config: Config = app.state.config
+        loader = SkillsLoader(config.workspace_path)
+
+        all_skills = loader.list_skills(filter_unavailable=False)
+        skill = next((s for s in all_skills if s["name"] == name), None)
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+
+        # Resolve the skill directory from the SKILL.md path
+        skill_dir = Path(skill["path"]).parent
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_path in skill_dir.rglob("*"):
+                if file_path.is_file():
+                    arcname = f"{name}/{file_path.relative_to(skill_dir)}"
+                    zf.write(file_path, arcname)
+        from fastapi.responses import Response
+        return Response(
+            content=buf.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
+        )
+
+    @app.post("/api/skills/upload")
+    async def upload_skill(file: UploadFile = File(...)):
+        """Upload a skill as a zip file."""
+        from nanobot.agent.skills import SkillsLoader
+
+        config: Config = app.state.config
+        loader = SkillsLoader(config.workspace_path)
+
+        if not file.filename or not file.filename.endswith(".zip"):
+            raise HTTPException(status_code=400, detail="File must be a .zip archive")
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = Path(tmp.name)
+
+        try:
+            with zipfile.ZipFile(tmp_path, "r") as zf:
+                names = zf.namelist()
+                # Find SKILL.md — could be at root or inside a single top-level dir
+                skill_md_entries = [n for n in names if n.endswith("SKILL.md")]
+                if not skill_md_entries:
+                    raise HTTPException(status_code=400, detail="Zip must contain a SKILL.md file")
+
+                # Determine skill name and extraction
+                skill_md = skill_md_entries[0]
+                parts = skill_md.split("/")
+                if len(parts) == 1:
+                    # SKILL.md at root — use zip filename as skill name
+                    skill_name = file.filename.rsplit(".", 1)[0]
+                else:
+                    # SKILL.md inside a directory — use that directory name
+                    skill_name = parts[0]
+
+                target_dir = loader.workspace_skills / skill_name
+                target_dir.mkdir(parents=True, exist_ok=True)
+
+                if len(parts) == 1:
+                    # Extract everything to skill_name/
+                    zf.extractall(target_dir)
+                else:
+                    # Extract contents of the top-level dir
+                    prefix = skill_name + "/"
+                    for member in names:
+                        if member.startswith(prefix):
+                            rel = member[len(prefix):]
+                            if not rel:
+                                continue
+                            dest = target_dir / rel
+                            if member.endswith("/"):
+                                dest.mkdir(parents=True, exist_ok=True)
+                            else:
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                with zf.open(member) as src, open(dest, "wb") as dst:
+                                    dst.write(src.read())
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        # Return the newly created skill info
+        meta = loader.get_skill_metadata(skill_name) or {}
+        available = loader._check_requirements(loader._get_skill_meta(skill_name))
+        return {
+            "name": skill_name,
+            "description": meta.get("description", skill_name),
+            "source": "workspace",
+            "available": available,
+            "path": str(loader.workspace_skills / skill_name / "SKILL.md"),
+        }
 
     # ------ Health ------
 

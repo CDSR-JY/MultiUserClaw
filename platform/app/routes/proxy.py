@@ -63,7 +63,17 @@ async def proxy_http(
                 detail="Nanobot container is starting up, please retry in a few seconds",
             )
 
-    return resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+    ct = resp.headers.get("content-type", "")
+    if ct.startswith("application/json"):
+        return resp.json()
+    # Binary responses (e.g. zip downloads) — stream through with original headers
+    from fastapi.responses import Response
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        media_type=ct,
+        headers={k: v for k, v in resp.headers.items() if k.lower() in ("content-disposition",)},
+    )
 
 
 # ---------------------------------------------------------------------------

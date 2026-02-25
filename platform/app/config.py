@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     container_idle_archive_days: int = 30
 
     # Quotas (tokens per day)
-    quota_free: int = 100_000
+    quota_free: int = 20000000
     quota_basic: int = 1_000_000
     quota_pro: int = 10_000_000
 

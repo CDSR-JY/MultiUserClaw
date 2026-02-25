@@ -51,6 +51,10 @@
 ![skill_create1.png](doc/skill_create1.png)
 ![skill_create2.png](doc/skill_create2.png)
 
+管理自己的skills
+![skill_page.png](doc/skill_page.png)
+
+
 每个用户的容器隔离独立联网
 ![使用curl命令.png](doc/%E4%BD%BF%E7%94%A8curl%E5%91%BD%E4%BB%A4.png)
 
@@ -731,7 +735,7 @@ nanobot web
 通过 `.env` 文件和 `docker-compose.yml` 的环境变量配置，详见 [1.3 配置 .env 文件](#13-配置-env-文件)。
 
 **环境变量覆写：** `NANOBOT_AGENTS__DEFAULTS__MODEL=xxx`（双下划线表示层级嵌套）
-
+配置每个用户的LLM的token额度: platform/app/config.py
 ---
 
 ## 13. CLI 命令

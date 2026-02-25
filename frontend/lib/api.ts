@@ -4,7 +4,7 @@
 // Auth requests go to /api/auth/*, nanobot requests are proxied via
 // /api/nanobot/* to the user's container.
 
-import type { ChatMessage, Session, SessionDetail, SystemStatus, CronJob, TokenResponse, AuthUser } from '@/types';
+import type { ChatMessage, Session, SessionDetail, SystemStatus, CronJob, Skill, TokenResponse, AuthUser } from '@/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -466,4 +466,83 @@ export async function runCronJob(jobId: string): Promise<void> {
 
 export async function ping(): Promise<{ message: string }> {
   return fetchJSON('/api/ping');
+}
+
+// ---------------------------------------------------------------------------
+// Skills (proxied)
+// ---------------------------------------------------------------------------
+
+export async function listSkills(): Promise<Skill[]> {
+  return fetchJSON('/api/nanobot/skills');
+}
+
+export async function downloadSkill(name: string): Promise<void> {
+  const url = `${API_URL}/api/nanobot/skills/${encodeURIComponent(name)}/download`;
+  const token = getAccessToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Download failed: ${text}`);
+  }
+
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${name}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+export async function deleteSkill(name: string): Promise<void> {
+  await fetchJSON(`/api/nanobot/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+}
+
+export async function uploadSkill(file: File): Promise<Skill> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const token = getAccessToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_URL}/api/nanobot/skills/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (res.status === 401) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      const retryHeaders: Record<string, string> = {};
+      const newToken = getAccessToken();
+      if (newToken) retryHeaders['Authorization'] = `Bearer ${newToken}`;
+      const retry = await fetch(`${API_URL}/api/nanobot/skills/upload`, {
+        method: 'POST',
+        headers: retryHeaders,
+        body: formData,
+      });
+      if (!retry.ok) {
+        const text = await retry.text();
+        throw new Error(`API error ${retry.status}: ${text}`);
+      }
+      return retry.json();
+    }
+    clearTokens();
+    if (typeof window !== 'undefined') window.location.href = '/login';
+    throw new Error('Session expired');
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  return res.json();
 }

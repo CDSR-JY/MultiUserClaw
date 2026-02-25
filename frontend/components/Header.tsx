@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageSquare, Activity, Clock, LogOut } from 'lucide-react';
+import { MessageSquare, Activity, Clock, Puzzle, LogOut } from 'lucide-react';
 import { useChatStore } from '@/lib/store';
 import { logout } from '@/lib/api';
 
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { name: 'Chat', href: '/', icon: MessageSquare },
   { name: 'Status', href: '/status', icon: Activity },
   { name: 'Cron', href: '/cron', icon: Clock },
+  { name: 'Skills', href: '/skills', icon: Puzzle },
 ];
 
 function ConnectionDot() {
