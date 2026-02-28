@@ -54,9 +54,12 @@
 管理自己的skills
 ![skill_page.png](doc/skill_page.png)
 
-
 每个用户的容器隔离独立联网
 ![使用curl命令.png](doc/%E4%BD%BF%E7%94%A8curl%E5%91%BD%E4%BB%A4.png)
+
+生成PPT的skill测试
+![ppt1.png](doc/ppt1.png)
+![ppt2.png](doc/ppt2.png)
 
 ## 1. 多租户部署（Docker Compose）
 
