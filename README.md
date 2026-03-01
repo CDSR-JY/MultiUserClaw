@@ -72,6 +72,10 @@ UPDATE:
 帮助页面
 ![help_page.png](doc/help_page.png)
 
+Agent browser skill使用
+![agent_browser1.png](doc/agent_browser1.png)
+![agent_browser2.png](doc/agent_browser2.png)
+
 ## 1. 多租户部署（Docker Compose）
 
 多租户模式下，每个用户拥有独立的 nanobot 容器，数据完全隔离。用户无需管理 API Key，只需注册登录即可使用。

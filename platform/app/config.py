@@ -35,9 +35,13 @@ class Settings(BaseSettings):
     # Docker
     nanobot_image: str = "nanobot:latest"
     container_network: str = "nanobot-internal"
-    container_memory_limit: str = "512m"
-    container_cpu_limit: float = 1.0
-    container_pids_limit: int = 100
+    # 🟢 提升资源限制（适合浏览器/agent）
+    container_memory_limit: str = "2g"  # 原来 512m
+    container_cpu_limit: float = 4.0  # 原来 1.0
+    container_pids_limit: int = 1024  # 原来 100
+
+    # 建议增加 shm（非常重要，防止 Chromium 崩溃）
+    container_shm_size: str = "1g"
     container_data_dir: str = "/data/nanobot-users"
 
     # Idle management

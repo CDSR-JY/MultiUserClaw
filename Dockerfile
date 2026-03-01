@@ -2,7 +2,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Install Node.js 20 for the WhatsApp bridge
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl tmux gh ca-certificates gnupg git && \
+    apt-get install -y --no-install-recommends curl iputils-ping tmux gh ca-certificates gnupg git && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
@@ -13,6 +13,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 # 给summarize工具安装
 RUN npm i -g @steipete/summarize
+# 安装 agent-browser
+RUN npm install -g agent-browser
+# 自动安装浏览器 + Linux 依赖
+RUN agent-browser install
+RUN npx playwright install-deps
 
 WORKDIR /app
 
