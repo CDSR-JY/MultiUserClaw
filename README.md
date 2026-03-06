@@ -1,6 +1,6 @@
 # MultiUserClaw - 多用户 AI Claw平台。
 
-基于nanobot改造的轻量级 AI 助手框架，支持多租户隔离部署、多平台渠道接入、工具调用、定时任务和 Web 实时通信。
+基于Openclaw（其它分支有nanobot)改造的轻量级 AI 助手框架，支持多租户隔离部署、多平台渠道接入、工具调用、定时任务和 Web 实时通信。
 
 在线体验地址，可以直接注册一个账号即可使用。
 http://117.133.60.219:3080
@@ -13,15 +13,6 @@ http://117.133.60.219:3080
 
 ---
 
-对原项目nanobot部分文件进行了修改，如果需要对nanobot进行更新，只需要保持这些文件不变即可。
-  - 改造 nanobot/providers/litellm_provider.py：
-    - 新增一个模式：当检测到环境变量 NANOBOT_LLM_PROXY_URL 时，所有 LLM 请求发往该 Proxy
-    - 不需要 api_key，改用 X-Container-Token（一个一次性 token，仅用于标识容器身份，不含任何 LLM 密钥信息）
-  - 改造 nanobot/config/schema.py：增加is_proxy_mode的配置
-  - nanobot/web 新增Web目录
-  - nanobot/agent/tools下的web.py新增get_wechat_article使用文件xng_search.py
-  - nanobot/cli/commands.py 新增if config.is_proxy_mode检测
-  - nanobot/channels/manager.py 启动web端管理
   - 新增platform作为控制容器的网关，每个用户单独创建容器进行管理
   - frontend前端页面进行显示
 
