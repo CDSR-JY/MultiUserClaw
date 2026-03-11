@@ -9,6 +9,7 @@ import {
   Radio,
   Brain,
   FolderOpen,
+  BookOpen,
   MessageSquare,
   Clock,
   Monitor,
@@ -37,6 +38,7 @@ const navSections = [
       { to: '/channels', icon: Radio, label: '渠道管理' },
       { to: '/models', icon: Brain, label: 'AI 模型' },
       { to: '/files', icon: FolderOpen, label: '文件管理' },
+      { to: '/knowledge', icon: BookOpen, label: '知识库' },
     ],
   },
   {
