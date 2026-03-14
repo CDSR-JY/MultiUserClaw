@@ -620,6 +620,20 @@ def _sync_agents(src_agents_dir: str, openclaw_home: str) -> int:
             "workspace": workspace_dir,
         })
 
+    # 确保默认的 main agent 始终被注册
+    # main 使用默认 workspace（~/.openclaw/workspace），不需要 workspace-main
+    main_agent_dir = os.path.join(openclaw_home, "agents", "main")
+    main_workspace = os.path.join(openclaw_home, "workspace")
+    if os.path.isdir(main_agent_dir) or os.path.isdir(main_workspace):
+        # 只在还没有被自定义 agent 覆盖时添加
+        if not any(a["id"] == "main" for a in agents_to_register):
+            agents_to_register.insert(0, {
+                "id": "main",
+                "name": "main",
+                "workspace": main_workspace,
+                "default": True,
+            })
+
     # 批量注册到 openclaw.json
     if agents_to_register:
         _register_agents_in_config(config_path, agents_to_register)
@@ -652,11 +666,14 @@ def _register_agents_in_config(config_path: str, agents: list):
     changed = False
     for agent in agents:
         if agent["id"] not in existing_ids:
-            config["agents"]["list"].append({
+            entry = {
                 "id": agent["id"],
                 "name": agent["name"],
                 "workspace": agent["workspace"],
-            })
+            }
+            if agent.get("default"):
+                entry["default"] = True
+            config["agents"]["list"].append(entry)
             log(f"  注册 Agent: {agent['name']} (workspace: ~/{os.path.relpath(agent['workspace'], os.path.expanduser('~'))})")
             changed = True
 

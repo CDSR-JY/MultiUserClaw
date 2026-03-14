@@ -38,6 +38,84 @@ function parseSkillsFindOutput(raw: string): SkillSearchResult[] {
   return results;
 }
 
+interface GitSkillInfo {
+  name: string;
+  description: string;
+  sourcePath: string;
+  relativePath: string;
+}
+
+function hashString(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    hash = ((hash << 5) - hash + ch) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function parseSkillMdDescription(content: string): string {
+  const lines = content.split("\n");
+  let inFrontmatter = false;
+  let description = "";
+
+  for (const line of lines) {
+    if (line.trim() === "---") {
+      inFrontmatter = !inFrontmatter;
+      continue;
+    }
+    if (inFrontmatter) {
+      const match = line.match(/^description:\s*(.+)/);
+      if (match) {
+        description = match[1].trim();
+      }
+    }
+  }
+
+  if (!description && lines.length > 0) {
+    description = lines.find((l) => l.trim() && l.trim() !== "---") || "";
+  }
+  return description;
+}
+
+/** Recursively scan a directory for skills (dirs with SKILL.md), searching up to 3 levels deep */
+function scanForSkills(rootDir: string, maxDepth = 3): GitSkillInfo[] {
+  const skills: GitSkillInfo[] = [];
+
+  function walk(dir: string, depth: number, relPrefix: string) {
+    if (depth > maxDepth) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch { return; }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") continue;
+
+      const fullPath = path.join(dir, entry.name);
+      const skillMd = path.join(fullPath, "SKILL.md");
+      const relPath = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+
+      if (fs.existsSync(skillMd)) {
+        const content = fs.readFileSync(skillMd, "utf-8");
+        const description = parseSkillMdDescription(content);
+        skills.push({
+          name: entry.name,
+          description,
+          sourcePath: fullPath,
+          relativePath: relPath,
+        });
+      } else {
+        // Go deeper
+        walk(fullPath, depth + 1, relPath);
+      }
+    }
+  }
+
+  walk(rootDir, 0, "");
+  return skills;
+}
+
 interface MarketplaceEntry {
   name: string;
   source: string;
@@ -283,6 +361,114 @@ export function marketplacesRoutes(_config: BridgeConfig): Router {
     fs.cpSync(pluginSourceDir, destDir, { recursive: true });
 
     res.json({ ok: true, path: destDir });
+  }));
+
+  // -----------------------------------------------------------------------
+  // Git repo skill scanning & installation
+  // -----------------------------------------------------------------------
+
+  // POST /api/marketplaces/git/scan-skills — clone a git repo and list skills
+  router.post("/marketplaces/git/scan-skills", asyncHandler(async (req, res) => {
+    const { url } = req.body;
+    if (!url || typeof url !== "string") {
+      res.status(400).json({ detail: "url is required" });
+      return;
+    }
+
+    // Validate git URL format
+    if (!isGitUrl(url)) {
+      res.status(400).json({ detail: "Invalid git URL. Supports https://, git@, ssh://, git:// URLs" });
+      return;
+    }
+
+    const repoName = nameFromSource(url);
+    const cacheDir = path.join(getMarketplacesDir(), "git-skills-cache");
+    const repoDir = path.join(cacheDir, repoName + "-" + hashString(url));
+
+    fs.mkdirSync(cacheDir, { recursive: true });
+
+    // Clone or update
+    try {
+      if (fs.existsSync(repoDir)) {
+        // Pull latest
+        try {
+          execSync("git pull --rebase", { cwd: repoDir, stdio: "pipe", timeout: 30000 });
+        } catch {
+          // Re-clone on failure
+          fs.rmSync(repoDir, { recursive: true });
+          execSync(`git clone --depth 1 "${url}" "${repoDir}"`, { stdio: "pipe", timeout: 60000 });
+        }
+      } else {
+        execSync(`git clone --depth 1 "${url}" "${repoDir}"`, { stdio: "pipe", timeout: 60000 });
+      }
+    } catch (err) {
+      res.status(400).json({ detail: `Failed to clone repo: ${(err as Error).message}` });
+      return;
+    }
+
+    // Scan for skills (directories containing SKILL.md)
+    const skills = scanForSkills(repoDir);
+
+    res.json({ repo: url, repoName, skills, cacheKey: repoName + "-" + hashString(url) });
+  }));
+
+  // POST /api/marketplaces/git/install-skills — install selected skills from a cloned git repo
+  router.post("/marketplaces/git/install-skills", asyncHandler(async (req, res) => {
+    const { cacheKey, skillNames } = req.body;
+    if (!cacheKey || typeof cacheKey !== "string") {
+      res.status(400).json({ detail: "cacheKey is required" });
+      return;
+    }
+    if (!Array.isArray(skillNames) || skillNames.length === 0) {
+      res.status(400).json({ detail: "skillNames array is required" });
+      return;
+    }
+
+    const repoDir = path.join(getMarketplacesDir(), "git-skills-cache", cacheKey);
+    if (!fs.existsSync(repoDir)) {
+      res.status(400).json({ detail: "Repo not found in cache. Please scan first." });
+      return;
+    }
+
+    const globalSkillsDir = path.join(os.homedir(), ".openclaw", "skills");
+    fs.mkdirSync(globalSkillsDir, { recursive: true });
+
+    const installedSkills: string[] = [];
+    const errors: string[] = [];
+
+    // Build a map of all skills found in the repo
+    const allSkills = scanForSkills(repoDir);
+    const skillPathMap = new Map<string, string>();
+    for (const s of allSkills) {
+      skillPathMap.set(s.name, s.sourcePath);
+    }
+
+    for (const name of skillNames) {
+      const safeName = String(name).replace(/[^a-zA-Z0-9_\-]/g, "");
+      if (!safeName) {
+        errors.push(`Invalid skill name: ${name}`);
+        continue;
+      }
+
+      const sourcePath = skillPathMap.get(safeName);
+      if (!sourcePath) {
+        errors.push(`Skill not found in repo: ${safeName}`);
+        continue;
+      }
+
+      const destDir = path.join(globalSkillsDir, safeName);
+      try {
+        if (fs.existsSync(destDir)) {
+          fs.rmSync(destDir, { recursive: true });
+        }
+        fs.cpSync(sourcePath, destDir, { recursive: true });
+        installedSkills.push(safeName);
+      } catch (err) {
+        errors.push(`Failed to install ${safeName}: ${(err as Error).message}`);
+      }
+    }
+
+    res.json({ ok: true, installed: installedSkills, errors });
   }));
 
   // -----------------------------------------------------------------------

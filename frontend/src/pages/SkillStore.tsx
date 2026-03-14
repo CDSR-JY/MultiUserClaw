@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { listSkills, searchSkills, installSkill, toggleSkill } from '../lib/api'
-import type { Skill, SkillSearchResult } from '../lib/api'
-import { Zap, Loader2, Search, Download, ExternalLink, Check } from 'lucide-react'
+import { listSkills, searchSkills, installSkill, toggleSkill, scanGitSkills, installGitSkills } from '../lib/api'
+import type { Skill, SkillSearchResult, GitScanResult } from '../lib/api'
+import { Zap, Loader2, Search, Download, ExternalLink, Check, GitBranch } from 'lucide-react'
 
 export default function SkillStore() {
   const [skills, setSkills] = useState<Skill[]>([])
@@ -20,6 +20,15 @@ export default function SkillStore() {
 
   // Toggle state
   const [toggling, setToggling] = useState<string | null>(null)
+
+  // Git repo state
+  const [gitUrl, setGitUrl] = useState('')
+  const [gitScanning, setGitScanning] = useState(false)
+  const [gitScanResult, setGitScanResult] = useState<GitScanResult | null>(null)
+  const [gitSelected, setGitSelected] = useState<Set<string>>(new Set())
+  const [gitInstalling, setGitInstalling] = useState(false)
+  const [gitError, setGitError] = useState('')
+  const [gitInstalled, setGitInstalled] = useState<Set<string>>(new Set())
 
   const refreshSkills = () => {
     listSkills().then(setSkills).catch(() => setSkills([]))
@@ -83,6 +92,55 @@ export default function SkillStore() {
     }
   }
 
+  const handleGitScan = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    if (!gitUrl.trim() || gitScanning) return
+    setGitScanning(true)
+    setGitError('')
+    setGitScanResult(null)
+    setGitSelected(new Set())
+    setGitInstalled(new Set())
+    try {
+      const result = await scanGitSkills(gitUrl.trim())
+      setGitScanResult(result)
+      // Auto-select all skills
+      setGitSelected(new Set(result.skills.map(s => s.name)))
+    } catch (err: any) {
+      setGitError(err?.message || '克隆仓库失败')
+    } finally {
+      setGitScanning(false)
+    }
+  }
+
+  const toggleGitSkillSelect = (name: string) => {
+    setGitSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  const handleGitInstall = async () => {
+    if (!gitScanResult || gitSelected.size === 0 || gitInstalling) return
+    setGitInstalling(true)
+    setGitError('')
+    try {
+      const result = await installGitSkills(gitScanResult.cacheKey, Array.from(gitSelected))
+      if (result.installed.length > 0) {
+        setGitInstalled(new Set(result.installed))
+        refreshSkills()
+      }
+      if (result.errors.length > 0) {
+        setGitError(result.errors.join('; '))
+      }
+    } catch (err: any) {
+      setGitError(err?.message || '安装失败')
+    } finally {
+      setGitInstalling(false)
+    }
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -113,6 +171,125 @@ export default function SkillStore() {
           搜索
         </button>
       </form>
+
+      {/* Git repo import */}
+      <div className="mb-6 rounded-xl border border-dark-border bg-dark-card p-5">
+        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-dark-text">
+          <GitBranch size={16} className="text-accent-purple" />
+          从 Git 仓库导入技能
+        </h2>
+        <form onSubmit={handleGitScan} className="flex gap-3">
+          <div className="flex flex-1 items-center gap-2 rounded-lg border border-dark-border bg-dark-bg px-4 py-2.5">
+            <GitBranch size={14} className="text-dark-text-secondary" />
+            <input
+              type="text"
+              placeholder="输入 Git 仓库地址，如 https://github.com/user/repo.git 或 git@github.com:user/repo.git"
+              value={gitUrl}
+              onChange={e => setGitUrl(e.target.value)}
+              className="flex-1 bg-transparent text-sm text-dark-text outline-none placeholder:text-dark-text-secondary"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={gitScanning || !gitUrl.trim()}
+            className="flex items-center gap-2 rounded-lg bg-accent-purple px-5 py-2.5 text-sm font-medium text-white hover:bg-accent-purple/90 disabled:opacity-50 transition-colors"
+          >
+            {gitScanning ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+            扫描
+          </button>
+        </form>
+
+        {gitError && (
+          <div className="mt-3 rounded-lg bg-accent-red/10 p-3 text-sm text-accent-red">
+            {gitError}
+          </div>
+        )}
+
+        {gitScanResult && (
+          <div className="mt-4">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm text-dark-text-secondary">
+                仓库 <span className="font-medium text-dark-text">{gitScanResult.repoName}</span> 中发现 {gitScanResult.skills.length} 个技能
+              </span>
+              {gitScanResult.skills.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      if (gitSelected.size === gitScanResult.skills.length) {
+                        setGitSelected(new Set())
+                      } else {
+                        setGitSelected(new Set(gitScanResult.skills.map(s => s.name)))
+                      }
+                    }}
+                    className="text-xs text-accent-blue hover:underline"
+                  >
+                    {gitSelected.size === gitScanResult.skills.length ? '取消全选' : '全选'}
+                  </button>
+                  <button
+                    onClick={handleGitInstall}
+                    disabled={gitInstalling || gitSelected.size === 0}
+                    className="flex items-center gap-1.5 rounded-lg bg-accent-green px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-green/90 disabled:opacity-50 transition-colors"
+                  >
+                    {gitInstalling ? (
+                      <><Loader2 size={13} className="animate-spin" /> 安装中...</>
+                    ) : (
+                      <><Download size={13} /> 安装选中 ({gitSelected.size})</>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {gitScanResult.skills.length === 0 ? (
+              <div className="rounded-lg border border-dark-border bg-dark-bg p-4 text-center text-sm text-dark-text-secondary">
+                该仓库中未找到技能（需要包含 SKILL.md 文件的目录）
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {gitScanResult.skills.map(skill => {
+                  const isSelected = gitSelected.has(skill.name)
+                  const isDone = gitInstalled.has(skill.name)
+                  return (
+                    <div
+                      key={skill.name}
+                      onClick={() => !isDone && toggleGitSkillSelect(skill.name)}
+                      className={`flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
+                        isDone
+                          ? 'border-accent-green/30 bg-accent-green/5'
+                          : isSelected
+                            ? 'border-accent-purple/40 bg-accent-purple/5'
+                            : 'border-dark-border bg-dark-bg hover:border-dark-border/80'
+                      }`}
+                    >
+                      <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+                        isDone
+                          ? 'border-accent-green bg-accent-green text-white'
+                          : isSelected
+                            ? 'border-accent-purple bg-accent-purple text-white'
+                            : 'border-dark-border'
+                      }`}>
+                        {(isSelected || isDone) && <Check size={12} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-dark-text">{skill.name}</span>
+                          <span className="text-xs text-dark-text-secondary">{skill.relativePath}</span>
+                        </div>
+                        {skill.description && (
+                          <p className="mt-0.5 text-xs text-dark-text-secondary truncate">{skill.description}</p>
+                        )}
+                      </div>
+                      {isDone && (
+                        <span className="shrink-0 text-xs font-medium text-accent-green">已安装</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {installError && (
         <div className="mb-4 rounded-lg bg-accent-red/10 p-3 text-sm text-accent-red">

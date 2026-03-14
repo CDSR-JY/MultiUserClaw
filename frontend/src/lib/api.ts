@@ -588,6 +588,46 @@ export async function installSkill(
 }
 
 // ---------------------------------------------------------------------------
+// Git repo skill scanning & installation
+// ---------------------------------------------------------------------------
+
+export interface GitSkillInfo {
+  name: string
+  description: string
+  relativePath: string
+}
+
+export interface GitScanResult {
+  repo: string
+  repoName: string
+  skills: GitSkillInfo[]
+  cacheKey: string
+}
+
+export async function scanGitSkills(url: string): Promise<GitScanResult> {
+  return fetchJSON<GitScanResult>(
+    '/api/openclaw/marketplaces/git/scan-skills',
+    {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    },
+  )
+}
+
+export async function installGitSkills(
+  cacheKey: string,
+  skillNames: string[],
+): Promise<{ ok: boolean; installed: string[]; errors: string[] }> {
+  return fetchJSON<{ ok: boolean; installed: string[]; errors: string[] }>(
+    '/api/openclaw/marketplaces/git/install-skills',
+    {
+      method: 'POST',
+      body: JSON.stringify({ cacheKey, skillNames }),
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Channels
 // ---------------------------------------------------------------------------
 

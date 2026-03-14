@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { BridgeGatewayClient } from "../gateway-client.js";
 import { randomUUID } from "node:crypto";
-import { asyncHandler, toOpenclawSessionKey, toNanobotSessionId, extractTextContent } from "../utils.js";
+import { asyncHandler, toOpenclawSessionKey, toNanobotSessionId, extractTextContent, stripInboundMetadata, cleanSessionTitle } from "../utils.js";
 
 interface OpenclawSessionRow {
   key: string;
@@ -24,6 +24,17 @@ interface OpenclawChatHistoryResult {
   [key: string]: unknown;
 }
 
+/** Convert "agent:programmer:session-1773503840989" → "programmer 会话" */
+function friendlySessionKey(key: string): string {
+  const parts = key.split(":");
+  // agent:<name>:session-<ts> or agent:<name>:<channel>:<id>
+  if (parts.length >= 2 && parts[0] === "agent") {
+    const agentName = parts[1]!;
+    return `${agentName} 会话`;
+  }
+  return key;
+}
+
 export function sessionsRoutes(client: BridgeGatewayClient): Router {
   const router = Router();
 
@@ -35,12 +46,21 @@ export function sessionsRoutes(client: BridgeGatewayClient): Router {
         includeDerivedTitles: true,
       });
 
-      const sessions = (result.sessions || []).map((s: OpenclawSessionRow) => ({
-        key: toNanobotSessionId(s.key),
-        created_at: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
-        updated_at: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
-        title: s.derivedTitle || s.displayName || s.key,
-      }));
+      const sessions = (result.sessions || []).map((s: OpenclawSessionRow) => {
+        const rawTitle = String(s.derivedTitle || s.displayName || "");
+        const cleaned = cleanSessionTitle(rawTitle);
+        // If title was all metadata (cleaned to empty), try lastMessagePreview as fallback
+        const lastPreview = typeof s.lastMessagePreview === "string"
+          ? cleanSessionTitle(s.lastMessagePreview)
+          : "";
+        const key = toNanobotSessionId(s.key);
+        return {
+          key,
+          created_at: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
+          updated_at: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
+          title: cleaned || lastPreview || friendlySessionKey(key),
+        };
+      });
 
       res.json(sessions);
     } catch (err) {
@@ -73,7 +93,9 @@ export function sessionsRoutes(client: BridgeGatewayClient): Router {
         })
         .map((m) => ({
           role: m.role,
-          content: extractTextContent(m.content),
+          content: m.role === "user"
+            ? stripInboundMetadata(extractTextContent(m.content))
+            : extractTextContent(m.content),
           timestamp: m.timestamp ? new Date(m.timestamp).toISOString() : null,
         }));
 

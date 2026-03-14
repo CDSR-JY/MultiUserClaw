@@ -70,6 +70,19 @@ if [ -d /deploy-copy ]; then
           changed = true;
         }
 
+        // Ensure default 'main' agent is always registered
+        if (!existingIds.has('main')) {
+          const mainWorkspace = path.join(openclawHome, 'workspace');
+          config.agents.list.unshift({
+            id: 'main',
+            name: 'main',
+            workspace: mainWorkspace,
+            default: true,
+          });
+          console.log('[entrypoint]   Registered default agent: main');
+          changed = true;
+        }
+
         if (changed) {
           fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         }

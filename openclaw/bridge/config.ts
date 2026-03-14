@@ -120,6 +120,14 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
         ui.allowedOrigins = Array.from(defaultOrigins);
       }
 
+      // --- plugins: ensure auto-discovered .ts plugins don't block gateway startup ---
+      // If plugins.allow is not set, default to empty array so only explicitly allowed plugins load.
+      // Users can configure specific plugins via the settings API.
+      if (!existing.plugins) existing.plugins = {};
+      if (!Array.isArray(existing.plugins.allow)) {
+        existing.plugins.allow = [];
+      }
+
       fs.writeFileSync(configPath, JSON.stringify(existing, null, 2), "utf-8");
     } catch {
       // Corrupted file, overwrite
