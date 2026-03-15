@@ -233,3 +233,49 @@ openclaw/Dockerfile.bridge 已经包含了完整的 openclaw 主程序（COPY . 
   - 遍历 /deploy-copy/Agents/*/，为每个 agent 创建目录、同步文件、注册配置
 
   两个脚本都是幂等的 — 已存在的文件不覆盖，已注册的 agent 不重复注册。
+
+
+  现有 Admin API 覆盖了大部分需求，但以下功能需要补充：
+
+  1. 审计日志查询 — 目前 audit_logs 表有数据但没有查询接口，需新增 GET /api/admin/audit
+  2. 用量历史数据 — 当前 /usage/summary 只返回今日汇总，图表需要按天/按用户的历史数据，需新增 GET
+  /api/admin/usage/history
+  3. 重置密码 — 需新增 PUT /api/admin/users/{user_id}/password
+
+  前端目录结构
+
+  manage_front/
+  ├── src/
+  │   ├── app/
+  │   │   ├── login/page.tsx
+  │   │   ├── (admin)/
+  │   │   │   ├── layout.tsx        (侧边栏布局)
+  │   │   │   ├── dashboard/page.tsx
+  │   │   │   ├── users/page.tsx
+  │   │   │   ├── containers/page.tsx
+  │   │   │   ├── usage/page.tsx
+  │   │   │   └── audit/page.tsx
+  │   │   ├── layout.tsx
+  │   │   └── page.tsx              (重定向到 dashboard)
+  │   ├── components/
+  │   │   ├── ui/                   (shadcn 组件)
+  │   │   ├── sidebar.tsx
+  │   │   └── header.tsx
+  │   ├── lib/
+  │   │   ├── api.ts                (Gateway API 客户端)
+  │   │   └── auth.ts               (JWT 存储/校验)
+  │   └── types/
+  │       └── index.ts
+  ├── Dockerfile
+  ├── docker-compose.yml            (或加入根目录的)
+  ├── tailwind.config.ts
+  ├── next.config.js
+  └── package.json
+
+  认证流程
+
+  1. 用户访问管理端 → 未登录重定向到 /login
+  2. 输入用户名密码 → 调用 Gateway /api/auth/login
+  3. 检查返回的 role，非 admin 提示无权限
+  4. admin 用户 → 存 JWT 到 localStorage → 进入管理页面
+  5. 每次 API 请求携带 Authorization: Bearer <token>
