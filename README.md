@@ -524,6 +524,7 @@ cd frontend && npm run dev
 
 ![chat.png](doc/chat.png)
 ![chat2.png](doc/chat2.png)
+![管理界面.png](doc/%E7%AE%A1%E7%90%86%E7%95%8C%E9%9D%A2.png)
 
 ---
 
